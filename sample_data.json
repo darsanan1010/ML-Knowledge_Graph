@@ -1,0 +1,71 @@
+[
+  {
+    "id": "node1",
+    "name": "Entity A",
+    "type": "Person",
+    "active": true,
+    "deleted": false,
+    "relationships": [
+      {
+        "target_id": "node2",
+        "properties": {
+          "weight": 0.8,
+          "since": "2024-01-01"
+        }
+      }
+    ]
+  },
+  {
+    "id": "node2",
+    "name": "Entity B",
+    "type": "Organization",
+    "active": true,
+    "deleted": false,
+    "relationships": [
+      {
+        "target_id": "node3",
+        "properties": {
+          "weight": 0.6
+        }
+      }
+    ]
+  },
+  {
+    "id": "node3",
+    "name": "Entity C",
+    "type": "Concept",
+    "active": true,
+    "deleted": false,
+    "relationships": []
+  },
+  {
+    "id": "node4",
+    "name": "Deleted Entity",
+    "type": "Person",
+    "active": false,
+    "deleted": true,
+    "relationships": []
+  },
+  {
+    "id": "node1",
+    "name": "Entity A Updated",
+    "type": "Person",
+    "active": true,
+    "deleted": false,
+    "relationships": [
+      {
+        "target_id": "node2",
+        "properties": {
+          "weight": 0.9,
+          "since": "2024-01-01"
+        }
+      },
+      {
+        "target_id": "node3",
+        "properties": {
+          "weight": 0.5
+        }
+      }
+    ]
+  }
+]
