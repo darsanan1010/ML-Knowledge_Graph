@@ -1,0 +1,53 @@
+[
+  {
+    "scenarioName": "A (Mobility \u2193 | Everything else normal)",
+    "predictedRiskLabel": "Low",
+    "riskScore": 15.8,
+    "probabilities": {
+      "Critical": 0.0,
+      "High": 0.0,
+      "Low": 0.87,
+      "Moderate": 0.13
+    },
+    "keyFeaturesSupplied": {
+      "activity_ratio": 0.2,
+      "sleep_ratio": 1.0,
+      "abnormal_domain_count": 1.0,
+      "severe_domain_count": 1.0
+    }
+  },
+  {
+    "scenarioName": "B (Mobility \u2193 | Sleep \u2193)",
+    "predictedRiskLabel": "Moderate",
+    "riskScore": 37.7,
+    "probabilities": {
+      "Critical": 0.0,
+      "High": 0.01,
+      "Low": 0.0,
+      "Moderate": 0.99
+    },
+    "keyFeaturesSupplied": {
+      "activity_ratio": 0.2,
+      "sleep_ratio": 0.4,
+      "abnormal_domain_count": 2.0,
+      "severe_domain_count": 2.0
+    }
+  },
+  {
+    "scenarioName": "C (Mobility \u2193 | Sleep \u2193 | HR \u2191 | HRV \u2193 | SpO2 \u2193)",
+    "predictedRiskLabel": "Moderate",
+    "riskScore": 38.2,
+    "probabilities": {
+      "Critical": 0.0,
+      "High": 0.02,
+      "Low": 0.0,
+      "Moderate": 0.97
+    },
+    "keyFeaturesSupplied": {
+      "activity_ratio": 0.2,
+      "sleep_ratio": 0.4,
+      "abnormal_domain_count": 5.0,
+      "severe_domain_count": 5.0
+    }
+  }
+]
