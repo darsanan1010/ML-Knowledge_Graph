@@ -634,7 +634,12 @@ def scored_risk_drivers(rule_result):
 SHAP_TRANSLATION = {
     "ewma_dbp": "Consistently elevated diastolic blood pressure",
     "transition_worsening_flag": "Multiple indicators have worsened compared with previous observations",
-    "context_worsening_count": "Several clinical domains show simultaneous deterioration"
+    "context_worsening_count": "Several clinical domains show simultaneous deterioration",
+    "activity_ratio": "reduced daily activity compared to baseline",
+    "activity_ratio_12h": "reduced recent activity",
+    "avg_sbp": "recent deviations in systolic blood pressure",
+    "avg_dbp": "recent deviations in diastolic blood pressure",
+    "avg_hr": "recent deviations in heart rate",
 }
 
 def translate_shap_feature(raw_feat, disp_name=None):
@@ -643,7 +648,7 @@ def translate_shap_feature(raw_feat, disp_name=None):
     
     ignored_raw = {
         "steps_30m", "steps_30m_vs_2h", "steps_30m_vs_6h", "steps_30m_vs_12h",
-        "abnormal_domain_count", "severe_domain_count"
+        "abnormal_domain_count", "severe_domain_count", "daily_sleep_feature_supported"
     }
     ignored_disp = {
         "short-term mobility drop",
@@ -881,6 +886,8 @@ def make_caregpt_payload(
         overall_trend_text = f"{rapid_dir} (rapid 6-hour trajectory)"
     elif active_trend.get("trend_direction") in ["worsening", "improving"]:
         overall_trend_text = f"{active_trend.get('trend_direction')} (24-hour trajectory)"
+    elif active_trend.get("trend_direction") == "insufficient_data":
+        overall_trend_text = "unclear due to insufficient historical data"
     else:
         overall_trend_text = "stable"
 
@@ -904,8 +911,40 @@ def make_caregpt_payload(
     bp_dia_str = fmt_val(bp_dia)
     
     vitals_abnormal = False
-    if (hr and (hr > 100 or hr < 50)) or (spo2 and spo2 < 90) or (bp_sys and (bp_sys > 160 or bp_sys < 90)):
+    if (hr and (hr > 100 or hr < 50)) or (spo2 and spo2 < 94) or (bp_sys and (bp_sys > 160 or bp_sys < 90)):
         vitals_abnormal = True
+
+    # --- V3: Drift Severity Classification ---
+    # Translates internal breach ratio math into Mild/Moderate/Severe labels
+    # for individual vital domains so caregivers see actionable text, not raw numbers.
+    def classify_drift_severity(breach_ratio):
+        """Returns Mild/Moderate/Severe based on how far outside the tolerance zone a vital is."""
+        if breach_ratio is None:
+            return None
+        if abs(breach_ratio) < 0.5:
+            return None  # Within tolerance, not worth labelling
+        elif abs(breach_ratio) < 1.0:
+            return "Mild"
+        elif abs(breach_ratio) < 1.5:
+            return "Moderate"
+        else:
+            return "Severe"
+
+    hr_breach = feature_context.get("hr_breach")
+    sbp_breach = feature_context.get("sbp_breach")
+    hr_severity = classify_drift_severity(hr_breach)
+    sbp_severity = classify_drift_severity(sbp_breach)
+
+    drift_phrases = []
+    if hr_severity:
+        direction = "elevated" if (hr_breach or 0) > 0 else "depressed"
+        drift_phrases.append(f"{hr_severity} heart rate drift ({direction}, {hr_str} bpm)")
+    if sbp_severity:
+        direction = "elevated" if (sbp_breach or 0) > 0 else "low"
+        drift_phrases.append(f"{sbp_severity} blood pressure drift ({direction}, {bp_sys_str}/{bp_dia_str} mmHg)")
+    drift_severity_text = ("; ".join(drift_phrases) + ".") if drift_phrases else None
+    # --- End Drift Severity Classification ---
+
 
     # 2. Recent Trend
     mob_ratio = feature_context.get("activity_ratio")
@@ -926,14 +965,20 @@ def make_caregpt_payload(
         for feat in shap_payload.get("topPositiveDrivers", []):
             disp_name = feat.get("displayName") or feat.get("feature", "")
             raw_feat = feat.get("feature", "")
-            if translate_shap_feature(raw_feat, disp_name) is None:
+            translated = translate_shap_feature(raw_feat, disp_name)
+            if translated is None:
                 continue
-            driver_terms.append(disp_name.replace("_", " "))
+            driver_terms.append(translated.lower())
             if len(driver_terms) >= 2:
                 break
 
     if len(driver_terms) > 0:
-        recent_trend += f" Recent observations show signs of {', '.join(driver_terms)}."
+        if len(driver_terms) == 1:
+            recent_trend += f" Recent observations show signs of {driver_terms[0]}."
+        elif len(driver_terms) == 2:
+            recent_trend += f" Recent observations show signs of {driver_terms[0]} and {driver_terms[1]}."
+        else:
+            recent_trend += f" Recent observations show signs of {', '.join(driver_terms[:-1])}, and {driver_terms[-1]}."
 
     # 3. Risk Assessment
     if len(driver_terms) == 1:
@@ -948,12 +993,24 @@ def make_caregpt_payload(
     risk_assessment = f"Overall fall risk is {final_label} ({score}/100). The assessment is primarily driven by {driver_str}."
 
     if vitals_abnormal:
-        current_status = f"Current vitals show abnormalities, with heart rate {hr_str} bpm, SPO2 {spo2_str}%, and blood pressure {bp_sys_str}/{bp_dia_str} mmHg, which contribute to the elevated fall-risk assessment."
+        abnormal_list = []
+        if hr and (hr > 100 or hr < 50):
+            abnormal_list.append(f"heart rate ({hr_str} bpm)")
+        if spo2 and spo2 < 94:
+            abnormal_list.append(f"SPO2 ({spo2_str}%)")
+        if bp_sys and (bp_sys > 160 or bp_sys < 90):
+            abnormal_list.append(f"blood pressure ({bp_sys_str}/{bp_dia_str} mmHg)")
+            
+        abnormal_str = ", ".join(abnormal_list)
+        current_status = f"Current vitals show abnormalities in {abnormal_str}. Recent readings: heart rate {hr_str} bpm, SPO2 {spo2_str}%, blood pressure {bp_sys_str}/{bp_dia_str} mmHg."
     else:
         if len(driver_terms) > 0:
-            current_status = f"Current vitals are presently stable, with heart rate {hr_str} bpm, SPO2 {spo2_str}%, and blood pressure {bp_sys_str}/{bp_dia_str} mmHg. However, recent observations included {driver_str}, which continue to contribute to the elevated fall-risk assessment."
+            current_status = f"While current point-in-time vitals are within normal ranges (heart rate {hr_str} bpm, SPO2 {spo2_str}%, BP {bp_sys_str}/{bp_dia_str} mmHg), resident shows {driver_str}, which continue to contribute to the elevated fall-risk assessment."
         else:
-            current_status = f"Current vitals are presently stable, with heart rate {hr_str} bpm, SPO2 {spo2_str}%, and blood pressure {bp_sys_str}/{bp_dia_str} mmHg."
+            current_status = f"Current point-in-time vitals are within normal ranges, with heart rate {hr_str} bpm, SPO2 {spo2_str}%, and blood pressure {bp_sys_str}/{bp_dia_str} mmHg."
+    # Append drift severity label if any vital is drifting outside its tolerance zone
+    if drift_severity_text:
+        current_status += f" Drift detected: {drift_severity_text}"
 
     # 4. Clinical Context
     context_notes = []
@@ -981,12 +1038,19 @@ def make_caregpt_payload(
     cov_12h_pct = int(cov_12h * 100) if cov_12h is not None else 0
     max_gap = feature_context.get("max_gap_minutes")
 
-    if cov_12h is not None and cov_12h >= 0.85 and (max_gap is None or max_gap < 60):
+    if max_gap is not None and max_gap > 1440:
+        confidence = f"Assessment confidence is low ({conf_pct}%). Coverage is sparse due to significant historical data gaps (>24h)."
+    elif cov_12h is not None and cov_12h >= 0.85 and (max_gap is None or max_gap < 60):
         confidence = f"Assessment confidence is high ({conf_pct}%). 12h coverage: {cov_12h_pct}%. No significant wearable gaps detected."
     elif cov_12h is not None and cov_12h >= 0.5:
-        confidence = f"Assessment confidence is moderate ({conf_pct}%). Coverage reduced to {cov_12h_pct}%. Several data interruptions detected."
+        if max_gap and max_gap >= 60 and cov_12h >= 0.85:
+            confidence = f"Assessment confidence is moderate ({conf_pct}%). Coverage is good ({cov_12h_pct}%), but a {int(max_gap)}-minute data gap was detected."
+        else:
+            confidence = f"Assessment confidence is moderate ({conf_pct}%). Coverage reduced to {cov_12h_pct}%. Several data interruptions detected."
     else:
         confidence = f"Assessment confidence is low ({conf_pct}%). Large wearable gaps detected. Trend calculations may be incomplete."
+        if cov_12h is not None and cov_12h < 0.25:
+            confidence += f" Note: Assessment is based on limited recent data (<25% coverage). Verify with direct observation."
 
     # 6. Recommendation
     recommendations = []
@@ -1019,10 +1083,9 @@ def make_caregpt_payload(
     final_insight_dict = {
         "currentStatus": current_status,
         "recentTrend": recent_trend,
-        "riskAssessment": risk_assessment,
         "clinicalContext": clinical_context,
-        "confidence": confidence,
-        "recommendation": recommendation_text
+        "recommendation": recommendations,
+        "supportingPatterns": list(set(driver_terms)),
     }
 
     return {
@@ -1059,6 +1122,9 @@ def make_caregpt_payload(
             "trendSeverity24h": trend_analysis.get("trend_severity"),
             "fallbackTrendDirection7d": fallback_analysis.get("trend_direction"),
             "fallbackTrendSeverity7d": fallback_analysis.get("trend_severity"),
+            "driftSeverityHR": hr_severity,
+            "driftSeveritySBP": sbp_severity,
+            "driftSeverityText": drift_severity_text,
         },
     }
 
@@ -1257,6 +1323,7 @@ def top_public_drivers(record, max_items=3):
     for driver in drivers:
         title = driver.get("parameter")
         detail = driver.get("detail", "")
+        driver_score = driver.get("score", 0)
         
         if title:
             if "tachycardia" in title.lower():
@@ -1266,10 +1333,22 @@ def top_public_drivers(record, max_items=3):
                 
             if title.lower() not in seen_titles:
                 seen_titles.add(title.lower())
+                
+                status_val = "worsening"
+                if driver.get("trend") == "Worsening":
+                    if driver_score == -1:
+                        status_val = "slightly worsening"
+                    elif driver_score == -2:
+                        status_val = "moderately worsening"
+                    elif driver_score <= -3:
+                        status_val = "significantly worsening"
+                else:
+                    status_val = "stable"
+                    
                 public_drivers.append(
                     {
                         "title": title,
-                        "status": "worsening" if driver.get("trend") == "Worsening" else "stable",
+                        "status": status_val,
                         "detail": detail,
                     }
                 )
@@ -1293,6 +1372,7 @@ def top_public_drivers(record, max_items=3):
             # Dynamic formatting for specific features in fallback
             feature_context = record.get("ruleEngineLayer", {}).get("featureContext", {})
             detail_text = None
+            driver_pct = None
             
             if raw_feat == "activity_ratio":
                 ratio_to_use = feature_context.get("activity_ratio_12h")
@@ -1307,6 +1387,7 @@ def top_public_drivers(record, max_items=3):
                 
                 if pct_decline > 0:
                     pct_decline = min(100, pct_decline)
+                    driver_pct = pct_decline
                     translated_title = f"Mobility declined {pct_decline}% over 12h from baseline"
                     if steps_12h is not None:
                         detail_text = f"12-Hour steps {steps_12h:.0f} below baseline {ref_steps_12h:.0f}"
@@ -1321,10 +1402,11 @@ def top_public_drivers(record, max_items=3):
             elif raw_feat == "sleep_deficit":
                 sleep_def = feature_context.get("sleep_deficit") or 0.0
                 daily_sleep = feature_context.get("daily_total_sleep_minutes")
-                sleep_baseline = feature_context.get("sleep_baseline_minutes") or 420.0
+                sleep_baseline = max(300.0, feature_context.get("sleep_baseline_minutes") or 420.0)
                 
                 pct_decline = int(sleep_def * 100)
                 pct_decline = max(0, min(100, pct_decline))
+                driver_pct = pct_decline
                 
                 translated_title = f"Sleep reduced {pct_decline}% below baseline over 24h"
                 if daily_sleep is not None:
@@ -1337,10 +1419,12 @@ def top_public_drivers(record, max_items=3):
                 if val is not None and ref_hr > 0:
                     if val > ref_hr:
                         pct = min(100, ((val - ref_hr) / ref_hr) * 100)
+                        driver_pct = pct
                         translated_title = f"Heart rate elevated {pct:.0f}% above baseline over 6h"
                         detail_text = f"6-Hour average HR {val:.0f} bpm above baseline {ref_hr:.0f} bpm"
                     else:
                         pct = min(100, ((ref_hr - val) / ref_hr) * 100)
+                        driver_pct = pct
                         translated_title = f"Heart rate reduced {pct:.0f}% below baseline over 6h"
                         detail_text = f"6-Hour average HR {val:.0f} bpm below baseline {ref_hr:.0f} bpm"
                 else:
@@ -1350,6 +1434,7 @@ def top_public_drivers(record, max_items=3):
                 val = feature_context.get("avg_hrv")
                 if val is not None and ref_hrv > 0:
                     pct = min(100, ((ref_hrv - val) / ref_hrv) * 100)
+                    driver_pct = pct
                     translated_title = f"HRV reduced {pct:.0f}% below baseline over 6h"
                     detail_text = f"6-Hour average HRV {val:.0f} below baseline {ref_hrv:.0f}"
                 else:
@@ -1359,6 +1444,7 @@ def top_public_drivers(record, max_items=3):
                 val = feature_context.get(raw_feat)
                 if val is not None and ref_spo2 > 0:
                     pct = min(100, ((ref_spo2 - val) / ref_spo2) * 100)
+                    driver_pct = pct
                     translated_title = f"SpO2 reduced {pct:.0f}% below baseline over 6h"
                     detail_text = f"6-Hour average SpO2 {val:.0f}% below baseline {ref_spo2:.0f}%"
                 else:
@@ -1369,10 +1455,12 @@ def top_public_drivers(record, max_items=3):
                 if val is not None and ref_sbp > 0:
                     if val > ref_sbp:
                         pct = min(100, ((val - ref_sbp) / ref_sbp) * 100)
+                        driver_pct = pct
                         translated_title = f"Systolic blood pressure elevated {pct:.0f}% above baseline over 6h"
                         detail_text = f"6-Hour average SBP {val:.0f} mmHg above baseline {ref_sbp:.0f} mmHg"
                     else:
                         pct = min(100, ((ref_sbp - val) / ref_sbp) * 100)
+                        driver_pct = pct
                         translated_title = f"Systolic blood pressure reduced {pct:.0f}% below baseline over 6h"
                         detail_text = f"6-Hour average SBP {val:.0f} mmHg below baseline {ref_sbp:.0f} mmHg"
                 else:
@@ -1383,14 +1471,42 @@ def top_public_drivers(record, max_items=3):
                 if val is not None and ref_dbp > 0:
                     if val > ref_dbp:
                         pct = min(100, ((val - ref_dbp) / ref_dbp) * 100)
+                        driver_pct = pct
                         translated_title = f"Diastolic blood pressure elevated {pct:.0f}% above baseline over 6h"
                         detail_text = f"6-Hour average DBP {val:.0f} mmHg above baseline {ref_dbp:.0f} mmHg"
                     else:
                         pct = min(100, ((ref_dbp - val) / ref_dbp) * 100)
+                        driver_pct = pct
                         translated_title = f"Diastolic blood pressure reduced {pct:.0f}% below baseline over 6h"
                         detail_text = f"6-Hour average DBP {val:.0f} mmHg below baseline {ref_dbp:.0f} mmHg"
                 else:
                     detail_text = f"Model detected anomalous {translated_title.lower()}"
+            elif raw_feat == "transition_worsening_flag":
+                detail_text = "Resident is shifting from their stable baseline into a deteriorating physiological state"
+            elif raw_feat == "context_worsening_count":
+                worsening = []
+                act_ratio = feature_context.get("activity_ratio_12h") or feature_context.get("activity_ratio", 1.0)
+                if act_ratio < 0.95:
+                    worsening.append("activity levels")
+                if feature_context.get("sleep_deficit", 0.0) > 0.0:
+                    worsening.append("sleep recovery")
+                hr_breach = feature_context.get("hr_breach", 0.0)
+                if hr_breach is not None and abs(hr_breach) > 0.0:
+                    worsening.append("heart rate stability")
+                sbp_breach = feature_context.get("sbp_breach", 0.0)
+                dbp_breach = feature_context.get("dbp_breach", 0.0)
+                if (sbp_breach is not None and abs(sbp_breach) > 0.0) or (dbp_breach is not None and abs(dbp_breach) > 0.0):
+                    worsening.append("blood pressure stability")
+                
+                if worsening:
+                    if len(worsening) == 1:
+                        detail_text = f"Subtle deterioration observed in {worsening[0]}"
+                    elif len(worsening) == 2:
+                        detail_text = f"Subtle deterioration observed in {worsening[0]} and {worsening[1]}"
+                    else:
+                        detail_text = f"Subtle deterioration observed in {', '.join(worsening[:-1])}, and {worsening[-1]}"
+                else:
+                    detail_text = "Simultaneous subtle deterioration detected across multiple physiological domains"
             else:
                 if raw_feat in SHAP_TRANSLATION:
                     detail_text = translated_title
@@ -1399,10 +1515,23 @@ def top_public_drivers(record, max_items=3):
                     
             if translated_title.lower() not in seen_titles:
                 seen_titles.add(translated_title.lower())
+                
+                status_val = "stable"
+                if feat.get("impact", 0) > 0:
+                    if driver_pct is not None:
+                        if driver_pct < 5:
+                            status_val = "slightly worsening"
+                        elif driver_pct < 15:
+                            status_val = "moderately worsening"
+                        else:
+                            status_val = "significantly worsening"
+                    else:
+                        status_val = "worsening"
+                        
                 public_drivers.append(
                     {
                         "title": translated_title,
-                        "status": "worsening" if feat.get("impact", 0) > 0 else "stable",
+                        "status": status_val,
                         "detail": detail_text,
                     }
                 )
@@ -1496,17 +1625,7 @@ def public_pipeline_record(record):
         "finalRisk": resolved.get("finalRisk"),
         "riskScore": latest_score,
         "riskScoreDelta": delta,
-        "confidence": {
-            "model": (record.get("v1ModelLayer") or {}).get("confidence"),
-        },
         "vitalsSnapshot": record.get("vitalsSnapshotLayer", {}),
-        "metadata": {
-            "coverage_6h": feature_context.get("coverage_6h"),
-            "coverage_12h": feature_context.get("coverage_12h"),
-            "largest_historical_gap": feature_context.get("max_gap_minutes"),
-            "max_gap_current_window": None,
-            "data_quality": data_quality,
-        },
         "finalInsight": care.get("finalInsight"),
         "trend": trend_info,
         "riskDrivers": final_drivers,
