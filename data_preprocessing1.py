@@ -720,6 +720,22 @@ band_df["spo2"] = np.where(
     np.nan,
 )
 
+# Add physiological bounds clipping
+band_df["heart_rate"] = pd.to_numeric(band_df["heart_rate"], errors="coerce")
+band_df.loc[(band_df["heart_rate"] < 30) | (band_df["heart_rate"] > 220), "heart_rate"] = np.nan
+
+band_df["systolic_bp"] = pd.to_numeric(band_df["systolic_bp"], errors="coerce")
+band_df.loc[(band_df["systolic_bp"] < 60) | (band_df["systolic_bp"] > 250), "systolic_bp"] = np.nan
+
+band_df["diastolic_bp"] = pd.to_numeric(band_df["diastolic_bp"], errors="coerce")
+band_df.loc[(band_df["diastolic_bp"] < 30) | (band_df["diastolic_bp"] > 150), "diastolic_bp"] = np.nan
+
+band_df["body_temperature"] = pd.to_numeric(band_df["body_temperature"], errors="coerce")
+band_df.loc[(band_df["body_temperature"] < 30.0) | (band_df["body_temperature"] > 43.0), "body_temperature"] = np.nan
+
+band_df["spo2"] = pd.to_numeric(band_df["spo2"], errors="coerce")
+band_df.loc[(band_df["spo2"] < 50) | (band_df["spo2"] > 100), "spo2"] = np.nan
+
 band_df["rem_sleep_minutes"] = pd.to_numeric(
     band_df["rem_sleep_time"],
     errors="coerce",
