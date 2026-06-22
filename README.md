@@ -2,13 +2,13 @@
 
 This repository contains the **Version 2** machine learning pipeline for the CareMP Fall Risk prediction system. It ingests physiological smartband data from a PostgreSQL database, engineers rolling time-series features, and uses an XGBoost model layered with a hardcoded rule engine and trend engine to output clinical fall-risk assessments.
 
-## 🚀 Core Features (V2 Enhancements)
+## Core Features (V2 Enhancements)
 - **Multi-Domain Logic:** Evaluates risk across Vitals, Recovery, Mobility, and Sleep domains to prevent isolated sensor failures (e.g., band removal) from causing false alarms.
 - **6-Hour Rapid Trend:** Detects rapid physiological deterioration alongside the standard 24-hour baseline trend.
 - **Explainability:** CareGPT dynamically generates a natural-language clinical narrative based on SHAP risk drivers and trend severity.
 - **Data Quality Gating:** The system enforces coverage thresholds and explicitly flags missing data (like missing sleep confidence) to prevent hallucinated predictions.
 
-## 📁 Key Files & Modules
+## Key Files & Modules
 
 | File | Purpose |
 |------|---------|
@@ -21,7 +21,7 @@ This repository contains the **Version 2** machine learning pipeline for the Car
 
 
 
-## 🛠️ How to Run
+## How to Run
 
 1. Ensure the PostgreSQL database connection string is properly configured in `env1.env`.
 2. Ensure you have the required Python packages (`pandas`, `xgboost`, `scikit-learn`, `joblib`, `psycopg2`).
@@ -31,7 +31,7 @@ This repository contains the **Version 2** machine learning pipeline for the Car
    ```
 4. The final clinical output will be saved as `fall_risk_public_output_v2.json`.
 
-## 🧪 Validation & Testing
+##  Validation & Testing
 You can run synthetic validation scenarios (like testing band-removal behavior) using:
 ```bash
 python scratch/validate_multidomain.py
