@@ -1079,8 +1079,8 @@ dataset["estimated_sleep_data_reliable"] = (
 ).astype(int)
 
 dataset["implausible_historical_sleep"] = (
-    (dataset["resident_median_sleep_minutes"] > 0)
-    & (dataset["resident_median_sleep_minutes"] < 240)
+    (dataset["sleep_baseline_minutes"] > 0)
+    & (dataset["sleep_baseline_minutes"] < 240)
 )
 
 base_sleep_used = np.where(

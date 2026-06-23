@@ -709,6 +709,29 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
     ] = np.nan
     band_df["stress"] = band_df["stress"].clip(lower=0, upper=MAX_STRESS_SCORE)
 
+    # --- V3: Physiological Bounds Filtering ---
+    # Drop BLE noise packets that violate human-possible physiological ranges.
+    # Invalid readings are set to NaN so they are safely ignored by the
+    # subsequent rolling window and EWMA calculations without crashing.
+    band_df["heart_rate"] = pd.to_numeric(band_df["heart_rate"], errors="coerce")
+    band_df.loc[
+        (band_df["heart_rate"] < 30) | (band_df["heart_rate"] > 220),
+        "heart_rate",
+    ] = np.nan
+
+    band_df["systolic_bp"] = pd.to_numeric(band_df["systolic_bp"], errors="coerce")
+    band_df.loc[
+        (band_df["systolic_bp"] < 50) | (band_df["systolic_bp"] > 260),
+        "systolic_bp",
+    ] = np.nan
+
+    band_df["diastolic_bp"] = pd.to_numeric(band_df["diastolic_bp"], errors="coerce")
+    band_df.loc[
+        (band_df["diastolic_bp"] < 30) | (band_df["diastolic_bp"] > 160),
+        "diastolic_bp",
+    ] = np.nan
+    # --- End Physiological Bounds Filtering ---
+
     band_df["spo2"] = np.where(
         band_df["oxygen_saturation_valid"].fillna(False).astype(bool),
         band_df["oxygen_saturation"],
@@ -1016,8 +1039,8 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
     ).astype(int)
     
     dataset["implausible_historical_sleep"] = (
-        (dataset["resident_median_sleep_minutes"] > 0)
-        & (dataset["resident_median_sleep_minutes"] < 240)
+        (dataset["sleep_baseline_minutes"] > 0)
+        & (dataset["sleep_baseline_minutes"] < 240)
     )
     
     base_sleep_used = np.where(
