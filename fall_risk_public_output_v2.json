@@ -19,7 +19,7 @@
     },
     "finalInsight": {
       "currentStatus": "While current point-in-time vitals are within normal ranges (heart rate 95.24 bpm, SPO2 97.62%, BP 126.52/84.17 mmHg), resident shows reduced mobility, which continue to contribute to the elevated fall-risk assessment.",
-      "recentTrend": "Overall risk trajectory is worsening (rapid 6-hour trajectory). Mobility has improved over the last 12 hours. Recent observations show signs of reduced mobility.",
+      "recentTrend": "Overall risk trajectory is worsening (rapid 6-hour trajectory). Recent observations show signs of reduced mobility.",
       "clinicalContext": "Resident is 44.0 years old.",
       "recommendation": [
         "Assess mobility status and recent activity decline."
@@ -75,7 +75,7 @@
     },
     "finalInsight": {
       "currentStatus": "While current point-in-time vitals are within normal ranges (heart rate 84.81 bpm, SPO2 97.13%, BP 119.09/79.18 mmHg), resident shows reduced mobility, which continue to contribute to the elevated fall-risk assessment.",
-      "recentTrend": "Overall risk trajectory is improving (24-hour trajectory). Mobility has improved over the last 12 hours. Recent observations show signs of reduced mobility.",
+      "recentTrend": "Overall risk trajectory is improving (24-hour trajectory). Recent observations show signs of reduced mobility.",
       "clinicalContext": "Resident is 61.0 years old. Resident is clinically obese (BMI 33.0).",
       "recommendation": [
         "Assess mobility status and recent activity decline."
@@ -191,7 +191,7 @@
     },
     "finalInsight": {
       "currentStatus": "While current point-in-time vitals are within normal ranges (heart rate 82.21 bpm, SPO2 96.53%, BP 117.22/78.05 mmHg), resident shows reduced mobility, which continue to contribute to the elevated fall-risk assessment.",
-      "recentTrend": "Overall risk trajectory is unclear due to insufficient historical data. Mobility has improved over the last 12 hours. Recent observations show signs of reduced mobility.",
+      "recentTrend": "Overall risk trajectory is unclear due to insufficient historical data. Recent observations show signs of reduced mobility.",
       "clinicalContext": "Resident is 37.0 years old. Resident is clinically obese (BMI 37.4).",
       "recommendation": [
         "Assess mobility status and recent activity decline."
@@ -272,12 +272,7 @@
       {
         "title": "Sleep reduced 72% below baseline over 24h",
         "status": "moderately worsening",
-        "detail": "Daily sleep 45min below baseline 165min"
-      },
-      {
-        "title": "High Fatigue",
-        "status": "slightly worsening",
-        "detail": "Recent avg fatigue 96"
+        "detail": "Daily sleep 45min below baseline 165min (Note: resident's personal baseline is below typical clinical norms \u2014 incomplete sleep tracking may be a factor)"
       }
     ],
     "supportingPatterns": [
@@ -310,7 +305,7 @@
       "currentSteps30m": 0.0
     },
     "finalInsight": {
-      "currentStatus": "Current vitals show abnormalities in SPO2 (90.0%). Recent readings: heart rate 81.32 bpm, SPO2 90.0%, blood pressure 117.28/78.07 mmHg.",
+      "currentStatus": "Current vitals show abnormalities in SPO2 (90.0%). Other readings: heart rate 81.32 bpm, BP 117.28/78.07 mmHg.",
       "recentTrend": "Overall risk trajectory is unclear due to insufficient historical data. Mobility has worsened over the last 12 hours. Recent observations show signs of reduced mobility and elevated heart rate.",
       "clinicalContext": "Resident is 76.0 years old. Resident is clinically underweight (BMI 18.0).",
       "recommendation": [
@@ -374,7 +369,7 @@
       "currentSteps30m": 0.0
     },
     "finalInsight": {
-      "currentStatus": "Current vitals show abnormalities in heart rate (167.76 bpm), blood pressure (177.26/118.04 mmHg). Recent readings: heart rate 167.76 bpm, SPO2 98.0%, blood pressure 177.26/118.04 mmHg.",
+      "currentStatus": "Current vitals show abnormalities in heart rate (167.76 bpm), blood pressure (177.26/118.04 mmHg). Other readings: SPO2 98.0%.",
       "recentTrend": "Overall risk trajectory is unclear due to insufficient historical data. Mobility has worsened over the last 12 hours. Recent observations show signs of reduced mobility and elevated heart rate.",
       "clinicalContext": "Resident is 52.0 years old. Resident is clinically obese (BMI 34.2). History of blood-pressure history, respiratory history.",
       "recommendation": [
@@ -406,11 +401,6 @@
         "title": "Failed physiological recovery",
         "status": "moderately worsening",
         "detail": "Heart rate elevated at 168bpm (baseline 75.0) with no downward trend for 15 mins"
-      },
-      {
-        "title": "Heart rate elevated 100% above baseline over 6h",
-        "status": "slightly worsening",
-        "detail": "6-Hour average HR 168 bpm above baseline 75 bpm"
       }
     ],
     "supportingPatterns": [
@@ -446,7 +436,7 @@
       "currentSteps30m": 99.0
     },
     "finalInsight": {
-      "currentStatus": "Current vitals show abnormalities in heart rate (124.24 bpm). Recent readings: heart rate 124.24 bpm, SPO2 98.0%, blood pressure 146.89/97.83 mmHg.",
+      "currentStatus": "Current vitals show abnormalities in heart rate (124.24 bpm). Other readings: SPO2 98.0%, BP 146.89/97.83 mmHg.",
       "recentTrend": "Overall risk trajectory is unclear due to insufficient historical data. Mobility has improved over the last 12 hours. Recent observations show signs of elevated heart rate.",
       "clinicalContext": "Resident is 69.0 years old. History of diabetes, blood-pressure history.",
       "recommendation": [
@@ -513,8 +503,8 @@
         "Evaluate cardiovascular stability and hydration status."
       ],
       "supportingPatterns": [
-        "reduced daily activity compared to baseline",
-        "recent deviations in systolic blood pressure"
+        "recent deviations in systolic blood pressure",
+        "reduced daily activity compared to baseline"
       ]
     },
     "trend": {
@@ -528,11 +518,6 @@
       }
     },
     "riskDrivers": [
-      {
-        "title": "Mobility Pattern",
-        "status": "worsening",
-        "detail": "12-Hour steps 5527 is above baseline 1000"
-      },
       {
         "title": "Systolic blood pressure reduced 2% below baseline over 6h",
         "status": "slightly worsening",
