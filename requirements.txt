@@ -1,0 +1,11 @@
+### 2. Installation
+
+fastapi 
+uvicorn 
+redis 
+pydantic 
+pandas 
+xgboost s
+scikit-learn
+ apscheduler 
+ python-dotenv
