@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 
 try:
-    from app.data.resident_context_cache import get_resident_baselines
+    from resident_context_cache import get_resident_baselines
 except ImportError:
     import pandas as pd
     def get_resident_baselines(*args, **kwargs):
@@ -35,7 +35,7 @@ except ImportError:
         ])
 
 
-env_path = Path(__file__).parent.parent.parent / "env1.env"
+env_path = Path(__file__).parent / "env1.env"
 load_dotenv(env_path)
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
