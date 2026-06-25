@@ -4,16 +4,13 @@ This directory contains the production-ready REST API for the V2 Fall Risk model
 
 ## Core Architectural Pillars
 
-### 1. Hybrid Smart-Batch Ingestion 
-Wearable bands transmit high-frequency telemetry packets (up to 1 packet per minute per resident). Running the full ML pipeline synchronously for every single packet would overwhelm the server's CPU and RAM. To solve this, the `/predict` endpoint utilizes a **Hybrid Fast-Track & Batching Architecture** backed by a Redis Sorted Set:
+Running the full ML pipeline synchronously for every single packet would overwhelm the server's CPU and RAM. To solve this, the `/predict` endpoint utilizes a **Hybrid Fast-Track & Batching Architecture** backed by a Redis Sorted Set:
 * **First-Packet Fast-Track:** When a resident's Redis queue is empty (e.g., they just put their band on or synced after a gap), the API processes the telemetry synchronously, triggering the XGBoost model instantly to return immediate clinical feedback to the dashboard.
 * **15-Minute Vectorized Batching:** If a resident is actively transmitting and their queue already contains recent packets, the API ingests the packet in milliseconds and returns a success response *without* running the ML model. An `AsyncIOScheduler` background job wakes up every 15 minutes, aggregates all queued data into a single, highly-efficient Pandas DataFrame (Vectorization), and processes predictions for all residents simultaneously.
 
-### 2. Concurrency Management & OOM Protection
-To protect the 1GB RAM limitation, the API implements strict concurrency controls using Python's `asyncio.Semaphore(4)`. 
-In the event of a network outage recovery—where 200 bands might attempt to sync historical data at the exact same millisecond—the system would normally attempt to load 200 Pandas DataFrames into memory, resulting in an immediate Out-Of-Memory (OOM) crash. The Semaphore acts as an application-level traffic light, physically restricting the system to a maximum of 4 concurrent ML executions. Excess requests are queued politely, guaranteeing that the server remains stable and responsive under infinite load.
 
-### 3. Synchronous Clinical Translation Layer
+
+### 2.Clinical Translation Layer
 While the core V2 XGBoost model outputs mathematical probabilities (e.g., `0.607`), the front-end Engineering Dashboard requires rich, human-readable clinical context. 
 To maintain backward compatibility with the dashboard, the API features an integrated **Translation Layer**. When the ML pipeline executes, it intercepts the raw XGBoost probability and feeds it into the legacy Clinical Rule Engine. The API then returns a deeply-nested JSON payload containing:
 * A normalized **0-100 Risk Score**
