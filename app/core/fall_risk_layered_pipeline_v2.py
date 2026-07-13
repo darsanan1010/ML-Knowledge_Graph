@@ -1088,7 +1088,10 @@ def make_caregpt_payload(
         
     if not recommendations:
         if final_label in ["High", "Critical"]:
-            recommendations.append("Caregiver review is recommended to assess whether the current drivers represent an emerging decline or a temporary condition.")
+            if len(driver_terms) > 0:
+                recommendations.append("Caregiver review is recommended to assess whether the current drivers represent an emerging decline or a temporary condition.")
+            else:
+                recommendations.append("Caregiver review is recommended to assess whether the subtle anomalies detected by the AI represent an emerging decline or a temporary condition.")
         elif final_label == "Moderate":
             recommendations.append("Closer monitoring is recommended, with caregiver review if symptoms, mobility, or vitals continue to worsen.")
         elif active_trend.get("trend_direction") == "worsening":
@@ -1100,13 +1103,33 @@ def make_caregpt_payload(
             
     recommendations = list(dict.fromkeys(recommendations))
     recommendation_text = " ".join(recommendations)
+            
+    CLEAN_PATTERN_MAP = {
+        "recovery domain flag": "Reduced sleep recovery",
+        "recovery_domain_flag": "Reduced sleep recovery",
+        "light sleep ratio": "Poor sleep quality",
+        "light_sleep_ratio": "Poor sleep quality",
+        "cardiovascular load": "Elevated cardiovascular stress",
+        "cardiovascular_load": "Elevated cardiovascular stress",
+        "sleep recovery": "Reduced sleep recovery",
+        "sleep_recovery": "Reduced sleep recovery",
+        "activity level": "Reduced mobility",
+        "activity_level": "Reduced mobility",
+        "stress index": "Elevated physiological stress",
+        "stress_index": "Elevated physiological stress"
+    }
+    
+    clean_driver_terms = []
+    for term in list(set(driver_terms)):
+        clean_term = CLEAN_PATTERN_MAP.get(term.lower(), term.replace(" Domain Flag", "").replace("_", " ").lower())
+        clean_driver_terms.append(clean_term)
 
     final_insight_dict = {
         "currentStatus": current_status,
         "recentTrend": recent_trend,
         "clinicalContext": clinical_context,
         "recommendation": recommendations,
-        "supportingPatterns": list(set(driver_terms)),
+        "supportingPatterns": list(set(clean_driver_terms)),
     }
 
     return {
@@ -1196,8 +1219,105 @@ def build_pipeline_record(
         db_path=history_db,
     )
     resolved_risk = resolve_risk(rule_result, prediction_row, trend_context)
-    resident_context = resident_context_payload(feature_row)
+    
+    # -------------------------------------------------------------------------
+    # CLINICAL VALIDATION RULES
+    # -------------------------------------------------------------------------
+    final_rank = risk_rank(resolved_risk["finalRisk"])
+    
+    # 1. Mobility Isolation Downgrade (High -> Moderate if NO vitals/sleep anomalies)
+    if final_rank == 2:
+        drivers = rule_result.get("riskDrivers", [])
+        shap_features = shap_payload.get("topPositiveDrivers", []) if isinstance(shap_payload, dict) else []
+        
+        has_vitals_drivers = False
+        for driver in drivers:
+            if driver.get("domain") in ["Vitals", "Sleep", "Data Quality"] and driver.get("score", 0) < 0:
+                has_vitals_drivers = True
+                break
+                
+        # Removed SHAP check for vitals to prevent XGBoost noise from blocking the downgrade
+        
+        has_mobility_drivers = False
+        for driver in drivers:
+            if driver.get("domain") == "Mobility" and driver.get("score", 0) < 0:
+                has_mobility_drivers = True
+                break
+        
+        # We can still let SHAP provide a mobility driver if rules missed it
+        if not has_mobility_drivers:
+            for feat in shap_features:
+                raw_feat = feat.get("feature", "").lower()
+                if any(k in raw_feat for k in ["step", "activity", "mobility"]):
+                    has_mobility_drivers = True
+                    break
+                    
+        if has_mobility_drivers and not has_vitals_drivers:
+            # Downgrade!
+            final_rank = 1
+            resolved_risk["finalRisk"] = "Moderate"
+            resolved_risk["riskScore"] = min(74, max(50, resolved_risk["riskScore"] - 25))
+            resolved_risk["resolutionReasons"].append("Alert downgraded from High to Moderate due to lack of vital sign corroboration (purely mobility-driven).")
+            
+    # 2. Temporal Smoothing / Hysteresis (Cap Moderate -> Critical fluctuations)
+    if final_rank == 3:
+        import sqlite3
+        import pandas as pd
+        import datetime
+        from dateutil import parser
+        try:
+            conn = sqlite3.connect(history_db)
+            current_time = pd.to_datetime(feature_row["generated_at"])
+            cutoff_time = current_time - datetime.timedelta(hours=4)
+            cutoff_str = cutoff_time.isoformat()
+            
+            history_df = pd.read_sql(
+                f"SELECT predicted_risk_label FROM fall_risk_prediction_history WHERE resident_id = {feature_row['resident_id']} AND generated_at >= '{cutoff_str}' AND generated_at < '{current_time.isoformat()}'",
+                conn
+            )
+            conn.close()
+            
+            if not history_df.empty:
+                # KNOWN PREVIOUS STATE: Apply strict hysteresis
+                max_hist_rank = history_df["predicted_risk_label"].apply(risk_rank).max()
+                if max_hist_rank <= 1: # Moderate or Low
+                    final_rank = 2
+                    resolved_risk["finalRisk"] = "High"
+                    resolved_risk["riskScore"] = 74 # Max high score
+                    resolved_risk["resolutionReasons"].append("Temporal smoothing (Hysteresis): Critical alert capped at High because previous 4h state was Moderate or lower (requires sustained deterioration).")
+            else:
+                # UNKNOWN PREVIOUS STATE: First-observation policy
+                # Policy: Maximum = High, UNLESS there is overwhelming evidence for Critical
+                p_critical = float(prediction_row.get("prob_Critical", 0.0))
+                has_severe_vitals = any(d.get("score", 0) <= -2 for d in rule_result.get("riskDrivers", []))
+                
+                overwhelming_case = (p_critical >= 0.85) and has_severe_vitals
+                
+                if not overwhelming_case:
+                    final_rank = 2
+                    resolved_risk["finalRisk"] = "High"
+                    resolved_risk["riskScore"] = 74
+                    resolved_risk["resolutionReasons"].append("First-observation policy: Critical alert capped at High because there is no prior baseline and no overwhelming evidence for immediate Critical status.")
+        except Exception as e:
+            pass # Fail gracefully if db not ready
 
+    # 3. Synchronize Smoothed Risk to Persistence Layer
+    try:
+        import sqlite3
+        conn = sqlite3.connect(history_db)
+        cursor = conn.cursor()
+        target_time_str = pd.to_datetime(feature_row["generated_at"]).isoformat()
+        cursor.execute(
+            f"UPDATE fall_risk_prediction_history SET predicted_risk_label = ? WHERE resident_id = ? AND generated_at LIKE ?",
+            (resolved_risk["finalRisk"], feature_row["resident_id"], target_time_str[:19] + "%")
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        pass # Fail gracefully if db not ready
+
+    resident_context = resident_context_payload(feature_row)
+    
     caregpt_note, bmi = None, None
     if carenotes_df is not None:
         caregpt_note, bmi = get_latest_carenote(feature_row["resident_id"], carenotes_df)
@@ -1659,13 +1779,28 @@ def public_pipeline_record(record):
     supporting_patterns = []
     seen_patterns = set(driver_titles)
     
+    CLEAN_PATTERN_MAP = {
+        "recovery domain flag": "Reduced sleep recovery",
+        "recovery_domain_flag": "Reduced sleep recovery",
+        "light sleep ratio": "Poor sleep quality",
+        "light_sleep_ratio": "Poor sleep quality",
+        "cardiovascular load": "Elevated cardiovascular stress",
+        "cardiovascular_load": "Elevated cardiovascular stress",
+        "sleep recovery": "Reduced sleep recovery",
+        "sleep_recovery": "Reduced sleep recovery",
+        "activity level": "Reduced mobility",
+        "activity_level": "Reduced mobility",
+        "stress index": "Elevated physiological stress",
+        "stress_index": "Elevated physiological stress",
+        "daily rem sleep minutes": "Reduced REM sleep",
+        "daily_rem_sleep_minutes": "Reduced REM sleep"
+    }
+
     for pat in raw_patterns:
-        translated = translate_shap_feature(pat, pat)
-        if not translated:
-            continue
-        if translated.lower() not in seen_patterns:
-            seen_patterns.add(translated.lower())
-            supporting_patterns.append(translated)
+        clean_pat = CLEAN_PATTERN_MAP.get(pat.lower(), pat.replace(" Domain Flag", "").replace("_", " ").lower())
+        if clean_pat.lower() not in seen_patterns:
+            seen_patterns.add(clean_pat.lower())
+            supporting_patterns.append(clean_pat)
             
     return {
         "residentId": record.get("residentId"),
@@ -1844,6 +1979,7 @@ def main():
             shap_payload = shap_fallback or unavailable_shap_payload(
                 "No SHAP explanation found for this row"
             )
+
 
         record = build_pipeline_record(
             feature_row=feature_row,
