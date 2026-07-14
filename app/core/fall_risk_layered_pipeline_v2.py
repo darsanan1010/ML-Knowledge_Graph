@@ -1358,11 +1358,6 @@ def build_pipeline_record(
         "systolicBP": safe_round(feature_row.get("systolic_bp") or rule_result["featureContext"].get("avg_sbp")),
         "diastolicBP": safe_round(feature_row.get("diastolic_bp") or rule_result["featureContext"].get("avg_dbp")),
         "temperature": safe_round(feature_row.get("body_temperature")),
-        "sleepScore": min(100, round(rule_result["featureContext"].get("sleep_ratio") * 100)) if rule_result["featureContext"].get("sleep_ratio") is not None else None,
-        "mobility": round(mob_ratio * 100) if mob_ratio is not None else None,
-        "mobilityDelta12h": mob_delta,
-        "trendDirection": mob_trend_dir,
-        "currentSteps30m": safe_round(rule_result["featureContext"].get("steps_30m")),
     }
 
     return {
