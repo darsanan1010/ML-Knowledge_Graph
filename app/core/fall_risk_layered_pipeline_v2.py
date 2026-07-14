@@ -1115,13 +1115,24 @@ def make_caregpt_payload(
         "sleep_recovery": "Reduced sleep recovery",
         "activity level": "Reduced mobility",
         "activity_level": "Reduced mobility",
+        "reduced activity level": "Reduced mobility",
+        "severe mobility flag": "Severe mobility impairment",
+        "severe_mobility_flag": "Severe mobility impairment",
+        "mobility flag": "Significant mobility decline",
+        "mobility_flag": "Significant mobility decline",
         "stress index": "Elevated physiological stress",
-        "stress_index": "Elevated physiological stress"
+        "stress_index": "Elevated physiological stress",
+        "daily rem sleep minutes": "Reduced REM sleep",
+        "daily_rem_sleep_minutes": "Reduced REM sleep"
     }
     
     clean_driver_terms = []
     for term in list(set(driver_terms)):
-        clean_term = CLEAN_PATTERN_MAP.get(term.lower(), term.replace(" Domain Flag", "").replace("_", " ").lower())
+        # Try exact map first; fallback strips underscores, domain flags, and the word 'flag'
+        clean_term = CLEAN_PATTERN_MAP.get(
+            term.lower(),
+            term.replace("_", " ").replace(" flag", "").replace(" Flag", "").strip().lower()
+        )
         clean_driver_terms.append(clean_term)
 
     final_insight_dict = {
@@ -1129,7 +1140,6 @@ def make_caregpt_payload(
         "recentTrend": recent_trend,
         "clinicalContext": clinical_context,
         "recommendation": recommendations,
-        "supportingPatterns": list(set(clean_driver_terms)),
     }
 
     return {
@@ -1790,6 +1800,11 @@ def public_pipeline_record(record):
         "sleep_recovery": "Reduced sleep recovery",
         "activity level": "Reduced mobility",
         "activity_level": "Reduced mobility",
+        "reduced activity level": "Reduced mobility",
+        "severe mobility flag": "Severe mobility impairment",
+        "severe_mobility_flag": "Severe mobility impairment",
+        "mobility flag": "Significant mobility decline",
+        "mobility_flag": "Significant mobility decline",
         "stress index": "Elevated physiological stress",
         "stress_index": "Elevated physiological stress",
         "daily rem sleep minutes": "Reduced REM sleep",
@@ -1797,7 +1812,10 @@ def public_pipeline_record(record):
     }
 
     for pat in raw_patterns:
-        clean_pat = CLEAN_PATTERN_MAP.get(pat.lower(), pat.replace(" Domain Flag", "").replace("_", " ").lower())
+        clean_pat = CLEAN_PATTERN_MAP.get(
+            pat.lower(),
+            pat.replace("_", " ").replace(" flag", "").replace(" Flag", "").strip().lower()
+        )
         if clean_pat.lower() not in seen_patterns:
             seen_patterns.add(clean_pat.lower())
             supporting_patterns.append(clean_pat)
@@ -1811,10 +1829,10 @@ def public_pipeline_record(record):
         "predictionConfidence": round(record.get("v1ModelLayer", {}).get("confidence", 0) * 100),
         "predictiveHorizon": "Next 24 hrs",
         "vitalsSnapshot": record.get("vitalsSnapshotLayer", {}),
-        "finalInsight": care.get("finalInsight"),
         "trend": trend_info,
         "riskDrivers": final_drivers,
         "supportingPatterns": supporting_patterns,
+        "finalInsight": care.get("finalInsight"),
         "clinicalContext": {
             "age": resident_context.get("age"),
             "ageGroup": resident_context.get("ageGroup"),

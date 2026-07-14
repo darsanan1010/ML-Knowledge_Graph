@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import URL
 
 try:
-    from resident_context_cache import get_resident_baselines
+    from app.data.resident_context_cache import get_resident_baselines
 except ImportError:
     import pandas as pd
     def get_resident_baselines(*args, **kwargs):
@@ -35,7 +35,7 @@ except ImportError:
         ])
 
 
-env_path = Path(__file__).parent / "env1.env"
+env_path = Path(__file__).parent.parent.parent / "env1.env"
 load_dotenv(env_path)
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -399,7 +399,9 @@ def fetch_band_logs(
         breathing,
         "bodyTemperature" AS body_temperature,
         "deepSleepTime" AS deep_sleep_time,
-        "lightSleepTime" AS light_sleep_time
+        "lightSleepTime" AS light_sleep_time,
+        "sleepConfidence" AS sleep_confidence,
+        "sleepComputationState" AS sleep_computation_state
     FROM band_log
     WHERE (
         "generatedAt" < %(training_start_at)s
@@ -500,6 +502,8 @@ def create_rolling_features(df):
         "breathing",
         "step_increment",
     ]
+    # Only keep columns that actually exist in the dataframe
+    value_columns = [c for c in value_columns if c in df.columns]
 
     def rolling_mean(group, column, window):
         return group[column].rolling(window).mean()
@@ -520,7 +524,11 @@ def create_rolling_features(df):
         features["avg_temp"] = group["body_temperature"].rolling("30min").mean()
         features["avg_stress"] = group["stress"].rolling("30min").mean()
         features["avg_fatigue"] = group["fatigue_level"].rolling("30min").mean()
-        features["avg_breathing"] = group["breathing"].rolling("30min").mean()
+        features["avg_breathing"] = (
+            group["breathing"].rolling("30min").mean()
+            if "breathing" in group.columns
+            else pd.Series(np.nan, index=group.index)
+        )
         features["steps_30m"] = (
             group["step_increment"]
             .rolling("30min")
@@ -691,7 +699,17 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
             return (temp - 32) * 5.0 / 9.0
         return temp
 
+    if "body_temperature" not in band_df.columns:
+        band_df["body_temperature"] = np.nan
     band_df["body_temperature"] = band_df["body_temperature"].apply(normalize_temperature)
+
+    # Guard optional fields that may not be present in all packet types
+    for _opt_col in ["hrv", "fatigue_level", "stress", "skin_temperature",
+                     "oxygen_saturation_valid", "deep_sleep_time", "light_sleep_time",
+                     "rem_sleep_time", "wearing_indicator"]:
+        if _opt_col not in band_df.columns:
+            band_df[_opt_col] = np.nan
+
     band_df["hrv"] = band_df["hrv"].replace(0, np.nan)
     band_df["fatigue_level"] = pd.to_numeric(band_df["fatigue_level"], errors="coerce")
     band_df.loc[
@@ -733,7 +751,7 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
     # --- End Physiological Bounds Filtering ---
 
     band_df["spo2"] = np.where(
-        band_df["oxygen_saturation_valid"].fillna(False).astype(bool),
+        band_df["oxygen_saturation_valid"].fillna(False).astype(bool) & (band_df["oxygen_saturation"] > 50),
         band_df["oxygen_saturation"],
         np.nan,
     )
@@ -1038,9 +1056,16 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
         & dataset["estimated_sleep_reliability"].ge(0.70)
     ).astype(int)
     
+    # Implausible if the configured baseline is suspiciously low (< 4 hours),
+    # OR if today's observed sleep total is physiologically impossible (< 60 mins).
+    # The second condition catches bad band readings (e.g. deepSleep=15, lightSleep=6)
+    # that previously passed through even when the baseline was healthy.
     dataset["implausible_historical_sleep"] = (
         (dataset["sleep_baseline_minutes"] > 0)
         & (dataset["sleep_baseline_minutes"] < 240)
+    ) | (
+        dataset["daily_sleep_data_reliable"].eq(0)          # band didn't mark it reliable
+        & dataset["daily_total_sleep_minutes"].fillna(0).lt(60)  # AND total < 1 hour
     )
     
     base_sleep_used = np.where(
@@ -1051,7 +1076,7 @@ def build_prediction_features(band_df, baseline_df, hours, use_latest_available=
     )
     
     dataset["sleep_used_for_risk"] = np.where(
-        dataset["implausible_historical_sleep"],
+        dataset["implausible_historical_sleep"] | (dataset["daily_sleep_confidence"] < 70),
         0,
         base_sleep_used
     ).astype(int)
